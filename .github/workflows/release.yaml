@@ -12,16 +12,18 @@ permissions:
 
 jobs:
   build-and-push:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
         include:
           - platform: linux/amd64
             goos: linux
             goarch: amd64
+            runner: ubuntu-latest
           - platform: linux/arm64
             goos: linux
             goarch: arm64
+            runner: ubuntu-24.04-arm
     outputs:
       version: ${{ steps.version.outputs.version }}
       tags: ${{ steps.meta.outputs.tags }}
