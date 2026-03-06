@@ -1,0 +1,13 @@
+{
+  "region": "cn-north-4",
+  "projectId": "your-project-id",
+  "zoneName": "example.com",
+  "akSecretRef": {
+    "name": "huawei-cloud-credentials",
+    "key": "access-key-id"
+  },
+  "skSecretRef": {
+    "name": "huawei-cloud-credentials",
+    "key": "secret-access-key"
+  }
+}

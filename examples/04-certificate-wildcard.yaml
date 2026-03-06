@@ -1,0 +1,24 @@
+# Example Certificate resource for a wildcard certificate
+# This will request a certificate for *.example.com and example.com
+
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: example-com-wildcard
+  namespace: default
+spec:
+  # Secret where the certificate will be stored
+  secretName: example-com-tls
+
+  # How often to renew (before expiration)
+  renewBefore: 720h  # 30 days
+
+  # Reference to the ClusterIssuer
+  issuerRef:
+    name: letsencrypt-huawei-prod
+    kind: ClusterIssuer
+
+  # DNS names for the certificate
+  dnsNames:
+  - "*.example.com"
+  - example.com
