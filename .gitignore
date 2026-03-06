@@ -1,0 +1,130 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+webhook
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage.out
+coverage.html
+
+# Go workspace file
+go.work
+go.work.sum
+
+# Dependency directories
+vendor/
+bin/
+_out/
+dist/
+build/
+
+# IDEs
+.idea/
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+*.code-workspace
+.settings/
+*.launch
+.classpath
+.project
+
+# Editors
+*.swp
+*.swo
+*~
+*.orig
+.repl_history
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# Temporary files
+*.tmp
+*.log
+*.log.*
+*.pid
+*.seed
+*.pid.lock
+
+# Helm
+*.tgz
+charts/*.tgz
+examples/_output/
+
+# Kubernetes
+*.kubeconfig
+kubeconfig
+*_secret*.yaml
+*_credentials*.yaml
+!examples/01-huawei-credentials-secret.yaml
+!examples/02-clusterissuer.yaml
+!examples/03-staging-clusterissuer.yaml
+
+# Docker
+.dockerignore
+docker-compose.override.yml
+
+# Security - NEVER commit these
+*.pem
+*.key
+*.crt
+*.cert
+*.p12
+*.pfx
+secrets/
+*.env
+*.env.local
+*.env.*.local
+!*.env.example
+
+# Air live reload tool
+.air.toml
+tmp/
+
+# Debug files
+debug
+debug.test
+__debug_bin
+
+# Cert-manager testing
+crds/
+*.yaml.backup
+*.yaml.bak
+
+# Coverage
+coverage.xml
+*.coverprofile
+
+# Benchmarks
+*.benchtest
+benchmark.txt
+
+# Profiling
+*.prof
+*.pprof
+cpu.prof
+mem.prof
+
+# Claude Code memory
+.claude/memory/
+.claude/projects/
+
+# GitHub
+.github/.dependabot-encrypted-data
