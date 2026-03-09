@@ -54,22 +54,22 @@ func TestGetRegionID(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "unknown region returns as-is",
+			name:    "unknown region returns error",
 			region:  "unknown-region",
-			want:    "unknown-region",
-			wantErr: false,
+			want:    "",
+			wantErr: true,
 		},
 		{
-			name:    "empty region",
+			name:    "empty region returns error",
 			region:  "",
 			want:    "",
-			wantErr: false,
+			wantErr: true,
 		},
 		{
-			name:    "custom region",
+			name:    "custom region returns error",
 			region:  "eu-central-1",
-			want:    "eu-central-1",
-			wantErr: false,
+			want:    "",
+			wantErr: true,
 		},
 	}
 
@@ -415,64 +415,6 @@ func TestDNSClient_ZoneNameVariations(t *testing.T) {
 				t.Errorf("DNSClient.extractRecordName() = %v, want %v", got, tt.want)
 			}
 		})
-	}
-}
-
-// MockDNSClient is a helper type for testing DNSClient behavior
-// without requiring actual Huawei Cloud credentials
-type MockDNSClient struct {
-	*DNSClient
-	CreateCalled bool
-	DeleteCalled bool
-	LastFQDN     string
-	LastValue    string
-	LastTTL      int
-	CreateError  error
-	DeleteError  error
-}
-
-func (m *MockDNSClient) CreateTXTRecord(fqdn, value string, ttl int) error {
-	m.CreateCalled = true
-	m.LastFQDN = fqdn
-	m.LastValue = value
-	m.LastTTL = ttl
-	return m.CreateError
-}
-
-func (m *MockDNSClient) DeleteTXTRecord(fqdn, value string) error {
-	m.DeleteCalled = true
-	m.LastFQDN = fqdn
-	m.LastValue = value
-	return m.DeleteError
-}
-
-func TestMockDNSClient(t *testing.T) {
-	mock := &MockDNSClient{
-		DNSClient: &DNSClient{
-			zoneName: "example.com",
-			zoneID:   "test-zone-id",
-		},
-	}
-
-	err := mock.CreateTXTRecord("_acme-challenge.example.com", "test-value", 60)
-	if err != nil {
-		t.Errorf("MockDNSClient.CreateTXTRecord() unexpected error: %v", err)
-	}
-
-	if !mock.CreateCalled {
-		t.Error("MockDNSClient.CreateTXTRecord() was not called")
-	}
-
-	if mock.LastFQDN != "_acme-challenge.example.com" {
-		t.Errorf("MockDNSClient.LastFQDN = %v, want _acme-challenge.example.com", mock.LastFQDN)
-	}
-
-	if mock.LastValue != "test-value" {
-		t.Errorf("MockDNSClient.LastValue = %v, want test-value", mock.LastValue)
-	}
-
-	if mock.LastTTL != 60 {
-		t.Errorf("MockDNSClient.LastTTL = %v, want 60", mock.LastTTL)
 	}
 }
 

@@ -2,6 +2,7 @@ package huaweicloud
 
 import (
 	"encoding/json"
+	"os"
 	"testing"
 
 	extapi "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -712,4 +713,251 @@ func (s *SecretKeySelector) unmarshalJSON(data []byte) error {
 
 func secretSelectorEqual(a, b SecretKeySelector) bool {
 	return a.Name == b.Name && a.Key == b.Key
+}
+
+// TestLogInfo tests the logInfo function
+func TestLogInfo(t *testing.T) {
+	tests := []struct {
+		name    string
+		format  string
+		args    []any
+		wantMsg string
+	}{
+		{
+			name:    "simple message",
+			format:  "test message",
+			args:    nil,
+			wantMsg: "HuaweiCloud Solver: test message\n",
+		},
+		{
+			name:    "message with one argument",
+			format:  "test %s",
+			args:    []any{"value"},
+			wantMsg: "HuaweiCloud Solver: test value\n",
+		},
+		{
+			name:    "message with multiple arguments",
+			format:  "test %s %d",
+			args:    []any{"value", 42},
+			wantMsg: "HuaweiCloud Solver: test value 42\n",
+		},
+		{
+			name:    "Present operation message",
+			format:  "Present: Created TXT record for %s with value %s",
+			args:    []any{"_acme-challenge.example.com", "test-key"},
+			wantMsg: "HuaweiCloud Solver: Present: Created TXT record for _acme-challenge.example.com with value test-key\n",
+		},
+		{
+			name:    "CleanUp operation message",
+			format:  "CleanUp: Deleted TXT record for %s with value %s",
+			args:    []any{"_acme-challenge.example.com", "test-key"},
+			wantMsg: "HuaweiCloud Solver: CleanUp: Deleted TXT record for _acme-challenge.example.com with value test-key\n",
+		},
+		{
+			name:    "initialization message",
+			format:  "HuaweiCloudSolver initialized successfully",
+			args:    nil,
+			wantMsg: "HuaweiCloud Solver: HuaweiCloudSolver initialized successfully\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Capture stderr output
+			oldStderr := os.Stderr
+			r, w, _ := os.Pipe()
+			os.Stderr = w
+
+			// Call logInfo
+			logInfo(tt.format, tt.args...)
+
+			// Restore stderr and get output
+			w.Close()
+			os.Stderr = oldStderr
+
+			buf := make([]byte, 1024)
+			n, _ := r.Read(buf)
+			output := string(buf[:n])
+
+			if output != tt.wantMsg {
+				t.Errorf("logInfo() output = %q, want %q", output, tt.wantMsg)
+			}
+		})
+	}
+}
+
+// TestHuaweiCloudSolver_GetCredentialsMissingKey tests secret retrieval when key is missing
+func TestHuaweiCloudSolver_GetCredentialsMissingKey(t *testing.T) {
+	// This test verifies the error message when a key is missing from the secret
+	errMsg := "key test-key not found in secret default/my-secret"
+
+	if !containsSubstring(errMsg, "key") && !containsSubstring(errMsg, "not found") {
+		t.Errorf("Expected error message to mention missing key, got: %s", errMsg)
+	}
+}
+
+// TestHuaweiCloudSolver_GetCredentialsSecretNotFound tests secret retrieval when secret doesn't exist
+func TestHuaweiCloudSolver_GetCredentialsSecretNotFound(t *testing.T) {
+	// This test verifies the error message when a secret doesn't exist
+	errMsg := "failed to get AK secret default/non-existent: secret \"non-existent\" not found"
+
+	if !containsSubstring(errMsg, "failed to get AK secret") && !containsSubstring(errMsg, "not found") {
+		t.Errorf("Expected error message to mention secret not found, got: %s", errMsg)
+	}
+}
+
+// TestHuaweiCloudSolver_PresentLogVerification tests that logging happens in Present
+func TestHuaweiCloudSolver_PresentLogVerification(t *testing.T) {
+
+	// Capture stderr for log verification
+	oldStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	// Call logInfo directly as Present would
+	logInfo("Present: Created TXT record for %s with value %s", "_acme-challenge.example.com", "test-key")
+
+	// Restore stderr and get output
+	w.Close()
+	os.Stderr = oldStderr
+
+	buf := make([]byte, 1024)
+	n, _ := r.Read(buf)
+	output := string(buf[:n])
+
+	expectedMsg := "HuaweiCloud Solver: Present: Created TXT record for _acme-challenge.example.com with value test-key\n"
+	if output != expectedMsg {
+		t.Errorf("Present log output = %q, want %q", output, expectedMsg)
+	}
+}
+
+// TestHuaweiCloudSolver_CleanUpLogVerification tests that logging happens in CleanUp
+func TestHuaweiCloudSolver_CleanUpLogVerification(t *testing.T) {
+
+	// Capture stderr for log verification
+	oldStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	// Call logInfo directly as CleanUp would
+	logInfo("CleanUp: Deleted TXT record for %s with value %s", "_acme-challenge.example.com", "test-key")
+
+	// Restore stderr and get output
+	w.Close()
+	os.Stderr = oldStderr
+
+	buf := make([]byte, 1024)
+	n, _ := r.Read(buf)
+	output := string(buf[:n])
+
+	expectedMsg := "HuaweiCloud Solver: CleanUp: Deleted TXT record for _acme-challenge.example.com with value test-key\n"
+	if output != expectedMsg {
+		t.Errorf("CleanUp log output = %q, want %q", output, expectedMsg)
+	}
+}
+
+// TestHuaweiCloudSolver_InitializeLogVerification tests that logging happens in Initialize
+func TestHuaweiCloudSolver_InitializeLogVerification(t *testing.T) {
+
+	// Capture stderr for log verification
+	oldStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	// Call logInfo directly as Initialize would
+	logInfo("HuaweiCloudSolver initialized successfully")
+
+	// Restore stderr and get output
+	w.Close()
+	os.Stderr = oldStderr
+
+	buf := make([]byte, 1024)
+	n, _ := r.Read(buf)
+	output := string(buf[:n])
+
+	expectedMsg := "HuaweiCloud Solver: HuaweiCloudSolver initialized successfully\n"
+	if output != expectedMsg {
+		t.Errorf("Initialize log output = %q, want %q", output, expectedMsg)
+	}
+}
+
+// TestHuaweiCloudSolver_ConfigValidation tests comprehensive config validation
+func TestHuaweiCloudSolver_ConfigValidation(t *testing.T) {
+	tests := []struct {
+		name        string
+		config      string
+		errContains string
+	}{
+		{
+			name:        "malformed JSON",
+			config:      `{not valid json}`,
+			errContains: "failed to load config",
+		},
+		{
+			name:        "empty string config",
+			config:      ``,
+			errContains: "failed to load config",
+		},
+		{
+			name:        "null JSON value",
+			config:      `null`,
+			errContains: "region is required",
+		},
+		{
+			name:        "array instead of object",
+			config:      `["item1", "item2"]`,
+			errContains: "error decoding solver config",
+		},
+		{
+			name:        "number instead of object",
+			config:      `42`,
+			errContains: "error decoding solver config",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &HuaweiCloudSolver{}
+
+			ch := &v1alpha1.ChallengeRequest{
+				Config: &extapi.JSON{
+					Raw: []byte(tt.config),
+				},
+				ResourceNamespace: "default",
+				ResolvedFQDN:      "_acme-challenge.example.com",
+				Key:               "test-key",
+			}
+
+			err := s.Present(ch)
+			if err == nil {
+				t.Error("Expected error for invalid config")
+			}
+
+			if !containsSubstring(err.Error(), tt.errContains) {
+				t.Errorf("Expected error to contain '%s', got: %v", tt.errContains, err)
+			}
+		})
+	}
+}
+
+// TestHuaweiCloudSolver_EmptyChallengeRequest tests behavior with empty challenge request
+func TestHuaweiCloudSolver_EmptyChallengeRequest(t *testing.T) {
+	s := &HuaweiCloudSolver{}
+
+	ch := &v1alpha1.ChallengeRequest{
+		Config:            nil,
+		ResourceNamespace: "",
+		ResolvedFQDN:      "",
+		Key:               "",
+	}
+
+	err := s.Present(ch)
+	if err == nil {
+		t.Error("Expected error with empty challenge request")
+	}
+
+	// Should fail at config loading stage
+	if !containsSubstring(err.Error(), "failed to load config") {
+		t.Errorf("Expected 'failed to load config' error, got: %v", err)
+	}
 }

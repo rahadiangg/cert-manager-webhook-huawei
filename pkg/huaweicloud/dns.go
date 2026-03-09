@@ -4,9 +4,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/huaweicloud/huaweicloud-sdk-go-v3/core/auth/global"
+	"github.com/huaweicloud/huaweicloud-sdk-go-v3/core/auth/basic"
 	"github.com/huaweicloud/huaweicloud-sdk-go-v3/core/region"
 	dns "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/dns/v2"
+	dnsregion "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/dns/v2/region"
 	"github.com/huaweicloud/huaweicloud-sdk-go-v3/services/dns/v2/model"
 )
 
@@ -22,7 +23,7 @@ type DNSClient struct {
 // NewDNSClient creates a new Huawei Cloud DNS client
 func NewDNSClient(regionName, projectID, ak, sk, zoneName string) (*DNSClient, error) {
 	// Create auth credential
-	auth, err := global.NewCredentialsBuilder().
+	auth, err := basic.NewCredentialsBuilder().
 		WithAk(ak).
 		WithSk(sk).
 		SafeBuild()
@@ -65,25 +66,14 @@ func NewDNSClient(regionName, projectID, ak, sk, zoneName string) (*DNSClient, e
 	return d, nil
 }
 
-// getRegionID converts region name to region ID
+// getRegionID converts region name to region using SDK's region lookup
 func getRegionID(region string) (string, error) {
-	// Map of common Huawei Cloud regions to their IDs
-	regionMap := map[string]string{
-		"cn-north-4":     "cn-north-4",
-		"cn-north-1":     "cn-north-1",
-		"cn-south-1":     "cn-south-1",
-		"cn-southwest-2": "cn-southwest-2",
-		"ap-southeast-1": "ap-southeast-1",
-		"ap-southeast-2": "ap-southeast-2",
-		"ap-southeast-3": "ap-southeast-3",
+	// Use SDK's built-in region lookup for DNS service
+	dnsRegion, err := dnsregion.SafeValueOf(region)
+	if err != nil {
+		return "", fmt.Errorf("invalid region %s: %w", region, err)
 	}
-
-	if id, ok := regionMap[region]; ok {
-		return id, nil
-	}
-
-	// If region is not in map, return it as-is (SDK might accept it)
-	return region, nil
+	return dnsRegion.Id, nil
 }
 
 // getZoneID retrieves the zone ID from zone name
