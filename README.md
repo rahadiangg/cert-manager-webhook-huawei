@@ -16,12 +16,12 @@ This webhook integrates [cert-manager](https://cert-manager.io) with Huawei Clou
 
 ### 1. Create IAM User with DNS Permissions
 
-1. Go to **IAM Console** → **Users** → **Create User**
-   - Username: `cert-manager-webhook`
-   - Access Mode: **Programmatic Access**
-   - Save the **Access Key ID (AK)** and **Secret Access Key (SK)**
+Go to **IAM Console** → **Users** → **Create User**:
+- Username: `cert-manager-webhook`
+- Access Mode: **Programmatic Access**
+- Save the **Access Key ID (AK)** and **Secret Access Key (SK)**
 
-2. Create a custom policy:
+Create a custom policy:
 ```json
 {
     "Version": "1.1",
@@ -37,24 +37,16 @@ This webhook integrates [cert-manager](https://cert-manager.io) with Huawei Clou
 }
 ```
 
-3. Attach the policy to your IAM user
+Attach the policy to your IAM user.
 
-### 2. Get Your Huawei Cloud Details
-
-| Item | How to Find |
-|------|-------------|
-| **Project ID** | DNS Console → click your domain → check URL, or EPS → Enterprise Projects |
-| **Region** | Top-right corner of Huawei Cloud console (e.g., `cn-north-4`) |
-| **Zone Name** | Your domain name (e.g., `example.com`) |
-
-### 3. Build and Push Docker Image
+### 2. Build and Push Docker Image
 
 ```bash
 docker build -t yourregistry.com/cert-manager-webhook-huawei:v1.0.0 .
 docker push yourregistry.com/cert-manager-webhook-huawei:v1.0.0
 ```
 
-### 4. Install the Webhook
+### 3. Install the Webhook
 
 ```bash
 helm install huawei-webhook ./deploy/huawei-webhook \
@@ -66,56 +58,23 @@ helm install huawei-webhook ./deploy/huawei-webhook \
 
 **Important:** Replace `acme.yourdomain.com` with a domain you own.
 
-### 5. Create Credentials Secret
+### 4. Apply Example Files
 
 ```bash
-kubectl apply -f - <<EOF
-apiVersion: v1
-kind: Secret
-metadata:
-  name: huawei-cloud-credentials
-  namespace: cert-manager
-type: Opaque
-stringData:
-  access-key-id: "YOUR_ACCESS_KEY_ID"
-  secret-access-key: "YOUR_SECRET_ACCESS_KEY"
-EOF
+# 1. Create credentials secret (edit with your Huawei Cloud AK/SK first)
+kubectl apply -f examples/01-huawei-credentials-secret.yaml
+
+# 2. Create staging ClusterIssuer (edit with your region, projectId, zoneName)
+kubectl apply -f examples/02-staging-clusterissuer.yaml
+
+# 3. Create certificate
+kubectl apply -f examples/03-certificate-wildcard.yaml
 ```
 
-### 6. Create ClusterIssuer
-
-Start with staging (recommended for testing):
+### 5. Verify
 
 ```bash
-kubectl apply -f examples/03-staging-clusterissuer.yaml
-```
-
-For production:
-```bash
-kubectl apply -f examples/02-clusterissuer.yaml
-```
-
-Edit the file with your details:
-- `region`: Your Huawei Cloud region
-- `projectId`: Your project ID
-- `zoneName`: Your domain name
-- `groupName`: Must match what you set in Helm install
-- `akSecretRef`/`skSecretRef`: References to your credentials secret
-
-### 7. Create Certificate
-
-```bash
-# For wildcard certificate
-kubectl apply -f examples/04-certificate-wildcard.yaml
-
-# Or for single domain
-kubectl apply -f examples/05-certificate-single.yaml
-```
-
-### 8. Verify
-
-```bash
-kubectl describe certificate example-com-wildcard -n default
+kubectl describe certificate example-wildcard-certificate -n cert-manager
 ```
 
 Expected output:
@@ -132,11 +91,24 @@ Status:
 | File | Purpose |
 |------|---------|
 | `01-huawei-credentials-secret.yaml` | Huawei Cloud AK/SK credentials |
-| `02-clusterissuer.yaml` | Production Let's Encrypt issuer |
-| `03-staging-clusterissuer.yaml` | Staging Let's Encrypt issuer (for testing) |
-| `04-certificate-wildcard.yaml` | Wildcard certificate example |
-| `05-certificate-single.yaml` | Single domain certificate example |
-| `06-ingress-example.yaml` | Ingress using the certificate |
+| `02-staging-clusterissuer.yaml` | Let's Encrypt staging issuer (for testing) |
+| `03-certificate-wildcard.yaml` | Wildcard certificate example |
+
+## Configuration
+
+Edit the example files with your details:
+
+### ClusterIssuer (`02-staging-clusterissuer.yaml`)
+
+- `region`: Your Huawei Cloud region (e.g., `cn-north-4`, `ap-southeast-1`)
+- `projectId`: Your project ID (found in DNS Console URL or EPS → Enterprise Projects)
+- `zoneName`: Your domain name
+- `groupName`: Must match what you set in Helm install
+- `email`: Your email for Let's Encrypt notifications
+
+### Certificate (`03-certificate-wildcard.yaml`)
+
+- `dnsNames`: The domains you want certificates for
 
 ## Troubleshooting
 
@@ -162,15 +134,6 @@ kubectl get apiservice | grep huawei
 # Restart webhook
 kubectl rollout restart deployment huawei-webhook -n cert-manager
 ```
-
-## How it works
-
-1. cert-manager creates an ACME challenge for your domain
-2. cert-manager calls this webhook
-3. The webhook creates a TXT record in Huawei Cloud DNS
-4. Let's Encrypt validates the TXT record
-5. The webhook deletes the TXT record
-6. Let's Encrypt issues the certificate
 
 ## License
 
