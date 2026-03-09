@@ -1,0 +1,50 @@
+# ClusterIssuer using Let's Encrypt Staging
+# Use this for testing! It has higher rate limits and doesn't count against production limits.
+
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-huawei-staging
+  namespace: cert-manager
+spec:
+  acme:
+    # Let's Encrypt staging server (for testing)
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+
+    # Your email for certificate expiration notices
+    email: dianraha11@gmail.com
+
+    # Private key for ACME registration
+    privateKeySecretRef:
+      name: letsencrypt-huawei-staging
+
+    # DNS-01 challenge solver using Huawei Cloud DNS
+    solvers:
+    - dns01:
+        webhook:
+        # Must match the groupName set in helm chart
+          groupName: acme.example.com
+
+          # Solver name defined in the webhook
+          solverName: huawei-solver
+
+          # Huawei Cloud DNS configuration
+          config:
+            # Your Huawei Cloud region
+            # NOTE: Use cn-north-4 for DNS service (recommended, most stable)
+            region: cn-north-4
+
+            # Your Huawei Cloud project ID
+            # Find it: Profile -> My Credentials
+            projectId: "xxxxxxxxxxxxxx"
+
+            # Your DNS zone name (domain)
+            zoneName: example.com
+
+            # Reference to Huawei Cloud credentials
+            akSecretRef:
+              name: huawei-cloud-credentials
+              key: access-key-id
+            skSecretRef:
+              name: huawei-cloud-credentials
+              key: secret-access-key
