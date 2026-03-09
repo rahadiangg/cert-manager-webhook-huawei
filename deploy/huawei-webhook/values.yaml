@@ -10,6 +10,14 @@
 # solve the DNS01 challenge.
 groupName: acme.yourdomain.com
 
+# Log level controls the verbosity of logging (default: info)
+# Valid values: debug, info, warn, error
+logLevel: info
+
+# Log format controls the output format of logs (default: text)
+# Valid values: text, json
+logFormat: text
+
 certManager:
   namespace: cert-manager
   serviceAccountName: cert-manager

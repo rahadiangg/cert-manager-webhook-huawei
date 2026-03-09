@@ -3,7 +3,6 @@ package huaweicloud
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -32,20 +31,29 @@ func (s *HuaweiCloudSolver) Name() string {
 // cert-manager itself will later perform a self check to ensure that the
 // solver has correctly configured the DNS provider.
 func (s *HuaweiCloudSolver) Present(ch *v1alpha1.ChallengeRequest) error {
+	Debug("Present called",
+		"resolved_fqdn", ch.ResolvedFQDN,
+		"key", ch.Key,
+		"resource_namespace", ch.ResourceNamespace,
+	)
+
 	cfg, err := loadConfig(ch.Config)
 	if err != nil {
+		Error("failed to load config", "error", err)
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
 	// Get credentials from Kubernetes Secret
 	ak, sk, err := s.getCredentials(ch.ResourceNamespace, cfg.AKSecretRef, cfg.SKSecretRef)
 	if err != nil {
+		Error("failed to get credentials", "namespace", ch.ResourceNamespace, "error", err)
 		return fmt.Errorf("failed to get credentials: %w", err)
 	}
 
 	// Create DNS client
 	dnsClient, err := NewDNSClient(cfg.Region, cfg.ProjectID, ak, sk, cfg.ZoneName)
 	if err != nil {
+		Error("failed to create DNS client", "region", cfg.Region, "project_id", cfg.ProjectID, "error", err)
 		return fmt.Errorf("failed to create DNS client: %w", err)
 	}
 
@@ -54,10 +62,21 @@ func (s *HuaweiCloudSolver) Present(ch *v1alpha1.ChallengeRequest) error {
 	ttl := 60
 	err = dnsClient.CreateTXTRecord(ch.ResolvedFQDN, ch.Key, ttl)
 	if err != nil {
+		Error("failed to create TXT record",
+			"fqdn", ch.ResolvedFQDN,
+			"value", ch.Key,
+			"ttl", ttl,
+			"error", err,
+		)
 		return fmt.Errorf("failed to create TXT record: %w", err)
 	}
 
-	logInfo("Present: Created TXT record for %s with value %s", ch.ResolvedFQDN, ch.Key)
+	Info("TXT record created successfully",
+		"fqdn", ch.ResolvedFQDN,
+		"key", ch.Key,
+		"ttl", ttl,
+		"zone", cfg.ZoneName,
+	)
 	return nil
 }
 
@@ -68,30 +87,48 @@ func (s *HuaweiCloudSolver) Present(ch *v1alpha1.ChallengeRequest) error {
 // This is in order to facilitate multiple DNS validations for the same domain
 // concurrently.
 func (s *HuaweiCloudSolver) CleanUp(ch *v1alpha1.ChallengeRequest) error {
+	Debug("CleanUp called",
+		"resolved_fqdn", ch.ResolvedFQDN,
+		"key", ch.Key,
+		"resource_namespace", ch.ResourceNamespace,
+	)
+
 	cfg, err := loadConfig(ch.Config)
 	if err != nil {
+		Error("failed to load config", "error", err)
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
 	// Get credentials from Kubernetes Secret
 	ak, sk, err := s.getCredentials(ch.ResourceNamespace, cfg.AKSecretRef, cfg.SKSecretRef)
 	if err != nil {
+		Error("failed to get credentials", "namespace", ch.ResourceNamespace, "error", err)
 		return fmt.Errorf("failed to get credentials: %w", err)
 	}
 
 	// Create DNS client
 	dnsClient, err := NewDNSClient(cfg.Region, cfg.ProjectID, ak, sk, cfg.ZoneName)
 	if err != nil {
+		Error("failed to create DNS client", "region", cfg.Region, "project_id", cfg.ProjectID, "error", err)
 		return fmt.Errorf("failed to create DNS client: %w", err)
 	}
 
 	// Delete the specific TXT record matching the key
 	err = dnsClient.DeleteTXTRecord(ch.ResolvedFQDN, ch.Key)
 	if err != nil {
+		Error("failed to delete TXT record",
+			"fqdn", ch.ResolvedFQDN,
+			"value", ch.Key,
+			"error", err,
+		)
 		return fmt.Errorf("failed to delete TXT record: %w", err)
 	}
 
-	logInfo("CleanUp: Deleted TXT record for %s with value %s", ch.ResolvedFQDN, ch.Key)
+	Info("TXT record deleted successfully",
+		"fqdn", ch.ResolvedFQDN,
+		"key", ch.Key,
+		"zone", cfg.ZoneName,
+	)
 	return nil
 }
 
@@ -107,12 +144,15 @@ func (s *HuaweiCloudSolver) CleanUp(ch *v1alpha1.ChallengeRequest) error {
 func (s *HuaweiCloudSolver) Initialize(kubeClientConfig *rest.Config, stopCh <-chan struct{}) error {
 	cl, err := kubernetes.NewForConfig(kubeClientConfig)
 	if err != nil {
+		Error("failed to create kubernetes clientset", "error", err)
 		return fmt.Errorf("failed to create kubernetes clientset: %w", err)
 	}
 
 	s.client = cl
 
-	logInfo("HuaweiCloudSolver initialized successfully")
+	Info("HuaweiCloudSolver initialized successfully",
+		"solver_name", s.Name(),
+	)
 	return nil
 }
 
@@ -145,10 +185,4 @@ func (s *HuaweiCloudSolver) getCredentials(namespace string, akRef, skRef Secret
 	}
 
 	return string(akBytes), string(skBytes), nil
-}
-
-// logInfo logs informational messages
-func logInfo(format string, args ...any) {
-	msg := fmt.Sprintf(format, args...)
-	fmt.Fprintf(os.Stderr, "HuaweiCloud Solver: %s\n", msg)
 }

@@ -39,24 +39,41 @@ Create a custom policy:
 
 Attach the policy to your IAM user.
 
-### 2. Build and Push Docker Image
-
-```bash
-docker build -t yourregistry.com/cert-manager-webhook-huawei:v1.0.0 .
-docker push yourregistry.com/cert-manager-webhook-huawei:v1.0.0
-```
-
-### 3. Install the Webhook
+### 2. Install the Webhook
 
 ```bash
 helm install huawei-webhook ./deploy/huawei-webhook \
   --namespace cert-manager \
   --set image.repository=yourregistry.com/cert-manager-webhook-huawei \
-  --set image.tag=v1.0.0 \
+  --set image.tag=1.0.0 \
   --set groupName=acme.yourdomain.com
 ```
 
 **Important:** Replace `acme.yourdomain.com` with a domain you own.
+
+### Optional: Configure Logging
+
+You can customize logging verbosity and format:
+
+```bash
+helm install huawei-webhook ./deploy/huawei-webhook \
+  --namespace cert-manager \
+  --set image.repository=yourregistry.com/cert-manager-webhook-huawei \
+  --set image.tag=1.0.0 \
+  --set groupName=acme.yourdomain.com \
+  --set logLevel=debug \
+  --set logFormat=json
+```
+
+**Log Levels:**
+- `debug` - Detailed logging for troubleshooting
+- `info` (default) - Standard informational messages
+- `warn` - Warning messages only
+- `error` - Error messages only
+
+**Log Formats:**
+- `text` (default) - Human-readable text format
+- `json` - JSON format for log aggregation systems
 
 ### 4. Apply Example Files
 
@@ -100,11 +117,13 @@ Edit the example files with your details:
 
 ### ClusterIssuer (`02-staging-clusterissuer.yaml`)
 
-- `region`: Your Huawei Cloud region (e.g., `cn-north-4`, `ap-southeast-1`)
+- `region`: Use `cn-north-4` (Huawei Cloud DNS is a global service, and this region provides the most stable API endpoint)
 - `projectId`: Your project ID (found in DNS Console URL or EPS → Enterprise Projects)
 - `zoneName`: Your domain name
 - `groupName`: Must match what you set in Helm install
 - `email`: Your email for Let's Encrypt notifications
+
+**Note:** While Huawei Cloud DNS supports multiple regions, `cn-north-4` is recommended as it's the primary region for the DNS service and provides the most reliable API access.
 
 ### Certificate (`03-certificate-wildcard.yaml`)
 
@@ -117,7 +136,33 @@ Edit the example files with your details:
 | `failed to list zones` | Check IAM permissions include `dns:zone:list` |
 | `zone not found` | Verify `zoneName` and `projectId` in ClusterIssuer |
 | `Unauthorized` | Verify AK/SK in the secret are correct |
+| `dial tcp: lookup region` | Ensure region is set to `cn-north-4` for DNS service |
+| `no such host` | Verify you're using `cn-north-4` region for DNS API |
 | `dry run failed` | Check webhook is running: `kubectl logs -n cert-manager -l app=huawei-webhook` |
+| `record already exists` | The webhook will automatically update existing TXT records |
+
+### Debug Logging
+
+For detailed logging to troubleshoot issues, reinstall the webhook with debug level:
+
+```bash
+helm upgrade huawei-webhook ./deploy/huawei-webhook \
+  --namespace cert-manager \
+  --reuse-values \
+  --set logLevel=debug
+```
+
+Then view the logs:
+```bash
+kubectl logs -n cert-manager -l app=huawei-webhook -f
+```
+
+### Log Levels Explained
+
+- **debug** - Shows all operations including DNS API calls, record lookups, and internal processing
+- **info** (default) - Shows successful operations (records created/deleted) and errors
+- **warn** - Shows only warnings and errors
+- **error** - Shows only errors
 
 ## Useful Commands
 

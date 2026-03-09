@@ -3,6 +3,7 @@ package huaweicloud
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/huaweicloud/huaweicloud-sdk-go-v3/core/auth/basic"
 	"github.com/huaweicloud/huaweicloud-sdk-go-v3/core/region"
@@ -22,6 +23,12 @@ type DNSClient struct {
 
 // NewDNSClient creates a new Huawei Cloud DNS client
 func NewDNSClient(regionName, projectID, ak, sk, zoneName string) (*DNSClient, error) {
+	Debug("creating DNS client",
+		"region", regionName,
+		"project_id", projectID,
+		"zone_name", zoneName,
+	)
+
 	// Create auth credential
 	auth, err := basic.NewCredentialsBuilder().
 		WithAk(ak).
@@ -32,14 +39,15 @@ func NewDNSClient(regionName, projectID, ak, sk, zoneName string) (*DNSClient, e
 	}
 
 	// Create region
-	regionID, err := getRegionID(regionName)
+	dnsRegion, err := getRegionID(regionName)
 	if err != nil {
+		Error("invalid region", "region", regionName, "error", err)
 		return nil, fmt.Errorf("invalid region %s: %w", regionName, err)
 	}
 
 	// Create HTTP client
 	httpClient, err := dns.DnsClientBuilder().
-		WithRegion(region.NewRegion(regionID, regionID)).
+		WithRegion(dnsRegion).
 		WithCredential(auth).
 		SafeBuild()
 	if err != nil {
@@ -51,7 +59,7 @@ func NewDNSClient(regionName, projectID, ak, sk, zoneName string) (*DNSClient, e
 
 	d := &DNSClient{
 		client:    client,
-		regionID:  regionID,
+		regionID:  dnsRegion.Id,
 		projectID: projectID,
 		zoneName:  zoneName,
 	}
@@ -59,21 +67,28 @@ func NewDNSClient(regionName, projectID, ak, sk, zoneName string) (*DNSClient, e
 	// Get zone ID
 	zoneID, err := d.getZoneID()
 	if err != nil {
+		Error("failed to get zone ID", "zone_name", zoneName, "error", err)
 		return nil, fmt.Errorf("failed to get zone ID: %w", err)
 	}
 	d.zoneID = zoneID
+
+	Info("DNS client created successfully",
+		"region", regionName,
+		"zone_id", zoneID,
+		"zone_name", zoneName,
+	)
 
 	return d, nil
 }
 
 // getRegionID converts region name to region using SDK's region lookup
-func getRegionID(region string) (string, error) {
+func getRegionID(region string) (*region.Region, error) {
 	// Use SDK's built-in region lookup for DNS service
 	dnsRegion, err := dnsregion.SafeValueOf(region)
 	if err != nil {
-		return "", fmt.Errorf("invalid region %s: %w", region, err)
+		return nil, fmt.Errorf("invalid region %s: %w", region, err)
 	}
-	return dnsRegion.Id, nil
+	return dnsRegion, nil
 }
 
 // getZoneID retrieves the zone ID from zone name
@@ -107,16 +122,128 @@ func (d *DNSClient) getZoneID() (string, error) {
 }
 
 // CreateTXTRecord creates a TXT record for ACME challenge
+// This method is idempotent and handles race conditions
 func (d *DNSClient) CreateTXTRecord(fqdn, value string, ttl int) error {
-	// Extract the record name (remove zone name suffix)
+	Debug("creating TXT record",
+		"fqdn", fqdn,
+		"value", value,
+		"ttl", ttl,
+	)
+
 	recordName := d.extractRecordName(fqdn)
+	const maxRetries = 3
 
-	// Huawei Cloud TXT record values must be quoted
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			Debug("retrying TXT record creation",
+				"attempt", attempt+1,
+				"max_retries", maxRetries,
+				"record_name", recordName)
+			time.Sleep(time.Duration(1<<uint(attempt)) * time.Second)
+		}
+
+		// Step 1: List existing records
+		existingRecords, err := d.listTXTRecords(recordName)
+		if err != nil {
+			Warn("failed to list existing records, will retry",
+				"error", err,
+				"attempt", attempt+1)
+			continue
+		}
+
+		// Step 2: Handle based on existing record count
+		switch len(existingRecords) {
+		case 0:
+			// No existing record - create new one
+			Debug("no existing records found, creating new record",
+				"record_name", recordName)
+
+			err := d.createTXTRecordWithRetry(recordName, value, ttl)
+			if err != nil {
+				// Check if it was created by another goroutine
+				records, checkErr := d.listTXTRecords(recordName)
+				if checkErr == nil && len(records) > 0 {
+					for _, r := range records {
+						if r.Records != nil && len(*r.Records) > 0 {
+							storedValue := strings.Trim((*r.Records)[0], `"`)
+							if storedValue == value {
+								Info("record was created by concurrent process (idempotent)",
+									"record_name", recordName)
+								return nil
+							}
+						}
+					}
+				}
+				Warn("create failed, will retry",
+					"error", err,
+					"attempt", attempt+1)
+				continue
+			}
+			Info("created new TXT record successfully",
+				"record_name", recordName,
+				"value", value)
+			return nil
+
+		case 1:
+			// One existing record - check if it matches
+			record := existingRecords[0]
+			if record.Records != nil && len(*record.Records) > 0 {
+				storedValue := strings.Trim((*record.Records)[0], `"`)
+
+				if storedValue == value {
+					Debug("record already exists with correct value (idempotent)",
+						"record_name", recordName)
+					return nil
+				}
+
+				// Value mismatch - update existing record
+				Info("updating existing record with new value",
+					"record_name", recordName,
+					"old_value", storedValue,
+					"new_value", value)
+
+				quotedValue := fmt.Sprintf("\"%s\"", value)
+				err := d.updateTXTRecord(recordName, quotedValue, ttl, "ACME challenge record")
+				if err != nil {
+					Warn("update failed, will retry",
+						"error", err,
+						"attempt", attempt+1)
+					continue
+				}
+				Info("updated TXT record successfully",
+					"record_name", recordName,
+					"value", value)
+				return nil
+			}
+			// Record has no value - delete and recreate
+			Warn("existing record has no value, deleting and recreating",
+				"record_id", *record.Id)
+			_ = d.deleteRecordByID(*record.Id)
+			continue
+
+		default:
+			// Multiple records exist - clean up all and recreate
+			Warn(fmt.Sprintf("multiple records found (%d), cleaning up and recreating", len(existingRecords)),
+				"record_name", recordName,
+				"count", len(existingRecords))
+
+			for _, r := range existingRecords {
+				if r.Id != nil {
+					_ = d.deleteRecordByID(*r.Id)
+				}
+			}
+			// Continue to next iteration to create new record
+			continue
+		}
+	}
+
+	return fmt.Errorf("failed to create TXT record after %d attempts", maxRetries)
+}
+
+// createTXTRecordWithRetry creates a new TXT record with conflict detection
+func (d *DNSClient) createTXTRecordWithRetry(recordName, value string, ttl int) error {
 	quotedValue := fmt.Sprintf("\"%s\"", value)
-
-	// Create description
 	description := "ACME challenge record"
-
 	ttlValue := int32(ttl)
 
 	request := &model.CreateRecordSetRequest{
@@ -131,8 +258,42 @@ func (d *DNSClient) CreateTXTRecord(fqdn, value string, ttl int) error {
 	}
 
 	_, err := d.client.CreateRecordSet(request)
+	return err
+}
+
+// updateTXTRecord updates an existing TXT record with a new value
+func (d *DNSClient) updateTXTRecord(recordName, quotedValue string, ttl int, description string) error {
+	// Get existing TXT records for this record name
+	records, err := d.listTXTRecords(recordName)
 	if err != nil {
-		return fmt.Errorf("failed to create TXT record: %w", err)
+		return fmt.Errorf("failed to list existing TXT records: %w", err)
+	}
+
+	if len(records) == 0 {
+		return fmt.Errorf("no existing TXT record found to update")
+	}
+
+	// Update the first matching record (there should typically be only one)
+	record := records[0]
+	if record.Id == nil {
+		return fmt.Errorf("existing record has no ID")
+	}
+
+	ttlValue := int32(ttl)
+
+	updateRequest := &model.UpdateRecordSetRequest{
+		ZoneId:     d.zoneID,
+		RecordsetId: *record.Id,
+		Body: &model.UpdateRecordSetReq{
+			Ttl:         &ttlValue,
+			Records:     &[]string{quotedValue},
+			Description: &description,
+		},
+	}
+
+	_, err = d.client.UpdateRecordSet(updateRequest)
+	if err != nil {
+		return fmt.Errorf("failed to update TXT record: %w", err)
 	}
 
 	return nil
@@ -140,10 +301,16 @@ func (d *DNSClient) CreateTXTRecord(fqdn, value string, ttl int) error {
 
 // DeleteTXTRecord deletes a TXT record by matching the value
 func (d *DNSClient) DeleteTXTRecord(fqdn, value string) error {
+	Debug("deleting TXT record",
+		"fqdn", fqdn,
+		"value", value,
+	)
+
 	// Get all TXT records for this FQDN
 	recordName := d.extractRecordName(fqdn)
 	records, err := d.listTXTRecords(recordName)
 	if err != nil {
+		Error("failed to list TXT records", "record_name", recordName, "error", err)
 		return fmt.Errorf("failed to list TXT records: %w", err)
 	}
 
@@ -153,12 +320,18 @@ func (d *DNSClient) DeleteTXTRecord(fqdn, value string) error {
 			// Remove quotes from stored value for comparison
 			storedValue := strings.Trim((*record.Records)[0], `"`)
 			if storedValue == value {
-				return d.deleteRecordByID(*record.Id)
+				err := d.deleteRecordByID(*record.Id)
+				if err != nil {
+					return err
+				}
+				Debug("TXT record deleted", "record_id", *record.Id, "record_name", recordName)
+				return nil
 			}
 		}
 	}
 
 	// If we didn't find the exact record, return nil (idempotent)
+	Debug("TXT record not found for deletion (idempotent)", "record_name", recordName)
 	return nil
 }
 
