@@ -351,10 +351,11 @@ func (d *DNSClient) listTXTRecords(recordName string) ([]model.ListRecordSets, e
 	}
 
 	// Filter for TXT records matching the record name
+	// Note: API returns names with trailing dots, normalize for comparison
 	var result []model.ListRecordSets
 	for _, record := range *response.Recordsets {
 		if record.Type != nil && *record.Type == "TXT" &&
-			record.Name != nil && *record.Name == recordName {
+			record.Name != nil && strings.TrimSuffix(*record.Name, ".") == recordName {
 			result = append(result, record)
 		}
 	}
