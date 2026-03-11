@@ -31,6 +31,7 @@ Create a custom policy:
             "dns:zone:list",
             "dns:recordset:list",
             "dns:recordset:create",
+            "dns:recordset:update",
             "dns:recordset:delete"
         ]
     }]
@@ -136,6 +137,7 @@ Edit the example files with your details:
 | `failed to list zones` | Check IAM permissions include `dns:zone:list` |
 | `zone not found` | Verify `zoneName` and `projectId` in ClusterIssuer |
 | `Unauthorized` | Verify AK/SK in the secret are correct |
+| `DNS.1802 No permissions` | Add `dns:recordset:update` to IAM policy (required for updating existing TXT records) |
 | `dial tcp: lookup region` | Ensure region is set to `cn-north-4` for DNS service |
 | `no such host` | Verify you're using `cn-north-4` region for DNS API |
 | `dry run failed` | Check webhook is running: `kubectl logs -n cert-manager -l app=huawei-webhook` |

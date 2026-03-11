@@ -21,6 +21,14 @@ type DNSClient struct {
 	zoneID     string
 }
 
+// OperationContext for DNS operations
+type OperationContext struct {
+	UID     string
+	Action  string
+	DNSName string
+	Issuer  string
+}
+
 // NewDNSClient creates a new Huawei Cloud DNS client
 func NewDNSClient(regionName, projectID, ak, sk, zoneName string) (*DNSClient, error) {
 	Debug("creating DNS client",
@@ -123,11 +131,13 @@ func (d *DNSClient) getZoneID() (string, error) {
 
 // CreateTXTRecord creates a TXT record for ACME challenge
 // This method is idempotent and handles race conditions
-func (d *DNSClient) CreateTXTRecord(fqdn, value string, ttl int) error {
-	Debug("creating TXT record",
-		"fqdn", fqdn,
-		"value", value,
-		"ttl", ttl,
+func (d *DNSClient) CreateTXTRecord(ctx OperationContext, fqdn, value string, ttl int) error {
+	Info("creating TXT record",
+		"uid", ctx.UID,
+		"action", ctx.Action,
+		"dns_name", ctx.DNSName,
+		"record_name", fqdn,
+		"step", "initialize",
 	)
 
 	recordName := d.extractRecordName(fqdn)
@@ -136,6 +146,9 @@ func (d *DNSClient) CreateTXTRecord(fqdn, value string, ttl int) error {
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		if attempt > 0 {
 			Debug("retrying TXT record creation",
+				"uid", ctx.UID,
+				"action", ctx.Action,
+				"dns_name", ctx.DNSName,
 				"attempt", attempt+1,
 				"max_retries", maxRetries,
 				"record_name", recordName)
@@ -143,9 +156,21 @@ func (d *DNSClient) CreateTXTRecord(fqdn, value string, ttl int) error {
 		}
 
 		// Step 1: List existing records
+		Info("listing existing TXT records",
+			"uid", ctx.UID,
+			"action", ctx.Action,
+			"dns_name", ctx.DNSName,
+			"record_name", recordName,
+			"step", "list_records",
+		)
+
 		existingRecords, err := d.listTXTRecords(recordName)
 		if err != nil {
 			Warn("failed to list existing records, will retry",
+				"uid", ctx.UID,
+				"action", ctx.Action,
+				"dns_name", ctx.DNSName,
+				"record_name", recordName,
 				"error", err,
 				"attempt", attempt+1)
 			continue
@@ -155,8 +180,13 @@ func (d *DNSClient) CreateTXTRecord(fqdn, value string, ttl int) error {
 		switch len(existingRecords) {
 		case 0:
 			// No existing record - create new one
-			Debug("no existing records found, creating new record",
-				"record_name", recordName)
+			Info("no existing records found, creating new record",
+				"uid", ctx.UID,
+				"action", ctx.Action,
+				"dns_name", ctx.DNSName,
+				"record_name", recordName,
+				"step", "create",
+			)
 
 			err := d.createTXTRecordWithRetry(recordName, value, ttl)
 			if err != nil {
@@ -168,20 +198,32 @@ func (d *DNSClient) CreateTXTRecord(fqdn, value string, ttl int) error {
 							storedValue := strings.Trim((*r.Records)[0], `"`)
 							if storedValue == value {
 								Info("record was created by concurrent process (idempotent)",
-									"record_name", recordName)
+									"uid", ctx.UID,
+									"action", ctx.Action,
+									"dns_name", ctx.DNSName,
+									"record_name", recordName,
+									"step", "complete")
 								return nil
 							}
 						}
 					}
 				}
 				Warn("create failed, will retry",
+					"uid", ctx.UID,
+					"action", ctx.Action,
+					"dns_name", ctx.DNSName,
+					"record_name", recordName,
 					"error", err,
 					"attempt", attempt+1)
 				continue
 			}
 			Info("created new TXT record successfully",
+				"uid", ctx.UID,
+				"action", ctx.Action,
+				"dns_name", ctx.DNSName,
 				"record_name", recordName,
-				"value", value)
+				"value", value,
+				"step", "complete")
 			return nil
 
 		case 1:
@@ -191,41 +233,66 @@ func (d *DNSClient) CreateTXTRecord(fqdn, value string, ttl int) error {
 				storedValue := strings.Trim((*record.Records)[0], `"`)
 
 				if storedValue == value {
-					Debug("record already exists with correct value (idempotent)",
-						"record_name", recordName)
+					Info("record already exists with correct value (idempotent)",
+						"uid", ctx.UID,
+						"action", ctx.Action,
+						"dns_name", ctx.DNSName,
+						"record_name", recordName,
+						"step", "complete")
 					return nil
 				}
 
 				// Value mismatch - update existing record
 				Info("updating existing record with new value",
+					"uid", ctx.UID,
+					"action", ctx.Action,
+					"dns_name", ctx.DNSName,
 					"record_name", recordName,
 					"old_value", storedValue,
-					"new_value", value)
+					"new_value", value,
+					"step", "update",
+				)
 
 				quotedValue := fmt.Sprintf("\"%s\"", value)
 				err := d.updateTXTRecord(recordName, quotedValue, ttl, "ACME challenge record")
 				if err != nil {
 					Warn("update failed, will retry",
+						"uid", ctx.UID,
+						"action", ctx.Action,
+						"dns_name", ctx.DNSName,
+						"record_name", recordName,
 						"error", err,
 						"attempt", attempt+1)
 					continue
 				}
 				Info("updated TXT record successfully",
+					"uid", ctx.UID,
+					"action", ctx.Action,
+					"dns_name", ctx.DNSName,
 					"record_name", recordName,
-					"value", value)
+					"value", value,
+					"step", "complete")
 				return nil
 			}
 			// Record has no value - delete and recreate
 			Warn("existing record has no value, deleting and recreating",
+				"uid", ctx.UID,
+				"action", ctx.Action,
+				"dns_name", ctx.DNSName,
 				"record_id", *record.Id)
 			_ = d.deleteRecordByID(*record.Id)
 			continue
 
 		default:
 			// Multiple records exist - clean up all and recreate
-			Warn(fmt.Sprintf("multiple records found (%d), cleaning up and recreating", len(existingRecords)),
+			Warn("multiple records found, cleaning up and recreating",
+				"uid", ctx.UID,
+				"action", ctx.Action,
+				"dns_name", ctx.DNSName,
 				"record_name", recordName,
-				"count", len(existingRecords))
+				"count", len(existingRecords),
+				"step", "cleanup_duplicate",
+			)
 
 			for _, r := range existingRecords {
 				if r.Id != nil {
@@ -300,17 +367,26 @@ func (d *DNSClient) updateTXTRecord(recordName, quotedValue string, ttl int, des
 }
 
 // DeleteTXTRecord deletes a TXT record by matching the value
-func (d *DNSClient) DeleteTXTRecord(fqdn, value string) error {
-	Debug("deleting TXT record",
-		"fqdn", fqdn,
-		"value", value,
+func (d *DNSClient) DeleteTXTRecord(ctx OperationContext, fqdn, value string) error {
+	Info("deleting TXT record",
+		"uid", ctx.UID,
+		"action", ctx.Action,
+		"dns_name", ctx.DNSName,
+		"record_name", fqdn,
+		"step", "initialize",
 	)
 
 	// Get all TXT records for this FQDN
 	recordName := d.extractRecordName(fqdn)
 	records, err := d.listTXTRecords(recordName)
 	if err != nil {
-		Error("failed to list TXT records", "record_name", recordName, "error", err)
+		Error("failed to list TXT records",
+			"uid", ctx.UID,
+			"action", ctx.Action,
+			"dns_name", ctx.DNSName,
+			"record_name", recordName,
+			"step", "list_records",
+			"error", err)
 		return fmt.Errorf("failed to list TXT records: %w", err)
 	}
 
@@ -320,18 +396,36 @@ func (d *DNSClient) DeleteTXTRecord(fqdn, value string) error {
 			// Remove quotes from stored value for comparison
 			storedValue := strings.Trim((*record.Records)[0], `"`)
 			if storedValue == value {
+				Info("deleting TXT record by ID",
+					"uid", ctx.UID,
+					"action", ctx.Action,
+					"dns_name", ctx.DNSName,
+					"record_id", *record.Id,
+					"record_name", recordName,
+					"step", "delete",
+				)
 				err := d.deleteRecordByID(*record.Id)
 				if err != nil {
 					return err
 				}
-				Debug("TXT record deleted", "record_id", *record.Id, "record_name", recordName)
+				Info("TXT record deleted",
+					"uid", ctx.UID,
+					"action", ctx.Action,
+					"dns_name", ctx.DNSName,
+					"record_id", *record.Id,
+					"record_name", recordName,
+					"step", "complete")
 				return nil
 			}
 		}
 	}
 
 	// If we didn't find the exact record, return nil (idempotent)
-	Debug("TXT record not found for deletion (idempotent)", "record_name", recordName)
+	Debug("TXT record not found for deletion (idempotent)",
+		"uid", ctx.UID,
+		"action", ctx.Action,
+		"dns_name", ctx.DNSName,
+		"record_name", recordName)
 	return nil
 }
 

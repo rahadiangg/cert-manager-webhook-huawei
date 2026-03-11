@@ -3,6 +3,7 @@ package huaweicloud
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -10,6 +11,29 @@ import (
 
 	"github.com/cert-manager/cert-manager/pkg/acme/webhook/apis/acme/v1alpha1"
 )
+
+// extractDNSName extracts user-facing domain from ResolvedFQDN
+func extractDNSName(ch *v1alpha1.ChallengeRequest) string {
+	// Prefer DNSName for wildcard certificates
+	if ch.DNSName != "" && strings.HasPrefix(ch.DNSName, "*.") {
+		return strings.TrimPrefix(ch.DNSName, "*.")
+	}
+
+	// Extract from ResolvedFQDN
+	if ch.ResolvedFQDN != "" {
+		fqdn := strings.TrimSuffix(ch.ResolvedFQDN, ".")
+		if strings.HasPrefix(fqdn, "_acme-challenge.") {
+			return strings.TrimPrefix(fqdn, "_acme-challenge.")
+		}
+		// Extract zone from FQDN
+		parts := strings.Split(fqdn, ".")
+		if len(parts) >= 2 {
+			return strings.Join(parts[len(parts)-2:], ".")
+		}
+	}
+
+	return "unknown"
+}
 
 // HuaweiCloudSolver implements the webhook.Solver interface for Huawei Cloud DNS
 type HuaweiCloudSolver struct {
@@ -31,51 +55,78 @@ func (s *HuaweiCloudSolver) Name() string {
 // cert-manager itself will later perform a self check to ensure that the
 // solver has correctly configured the DNS provider.
 func (s *HuaweiCloudSolver) Present(ch *v1alpha1.ChallengeRequest) error {
-	Debug("Present called",
-		"resolved_fqdn", ch.ResolvedFQDN,
-		"key", ch.Key,
-		"resource_namespace", ch.ResourceNamespace,
-	)
-
 	cfg, err := loadConfig(ch.Config)
 	if err != nil {
-		Error("failed to load config", "error", err)
+		Error("ACME challenge: failed to load config",
+			"uid", ch.UID,
+			"action", "present",
+			"error", err)
 		return fmt.Errorf("failed to load config: %w", err)
 	}
+
+	dnsName := extractDNSName(ch)
+
+	Info("ACME challenge: Present started",
+		"uid", ch.UID,
+		"action", "present",
+		"dns_name", dnsName,
+		"resolved_fqdn", ch.ResolvedFQDN,
+		"namespace", ch.ResourceNamespace,
+	)
 
 	// Get credentials from Kubernetes Secret
 	ak, sk, err := s.getCredentials(ch.ResourceNamespace, cfg.AKSecretRef, cfg.SKSecretRef)
 	if err != nil {
-		Error("failed to get credentials", "namespace", ch.ResourceNamespace, "error", err)
+		Error("ACME challenge: failed to get credentials",
+			"uid", ch.UID,
+			"action", "present",
+			"dns_name", dnsName,
+			"namespace", ch.ResourceNamespace,
+			"error", err)
 		return fmt.Errorf("failed to get credentials: %w", err)
 	}
 
 	// Create DNS client
 	dnsClient, err := NewDNSClient(cfg.Region, cfg.ProjectID, ak, sk, cfg.ZoneName)
 	if err != nil {
-		Error("failed to create DNS client", "region", cfg.Region, "project_id", cfg.ProjectID, "error", err)
+		Error("ACME challenge: failed to create DNS client",
+			"uid", ch.UID,
+			"action", "present",
+			"dns_name", dnsName,
+			"region", cfg.Region,
+			"project_id", cfg.ProjectID,
+			"error", err)
 		return fmt.Errorf("failed to create DNS client: %w", err)
+	}
+
+	// Create operation context for DNS operations
+	ctx := OperationContext{
+		UID:     string(ch.UID),
+		Action:  "present",
+		DNSName: dnsName,
 	}
 
 	// Create TXT record
 	// Use a reasonable TTL - 60 seconds is typical for ACME challenges
 	ttl := 60
-	err = dnsClient.CreateTXTRecord(ch.ResolvedFQDN, ch.Key, ttl)
+	err = dnsClient.CreateTXTRecord(ctx, ch.ResolvedFQDN, ch.Key, ttl)
 	if err != nil {
-		Error("failed to create TXT record",
-			"fqdn", ch.ResolvedFQDN,
-			"value", ch.Key,
+		Error("ACME challenge: failed to create TXT record",
+			"uid", ch.UID,
+			"action", "present",
+			"dns_name", dnsName,
+			"record_name", ch.ResolvedFQDN,
 			"ttl", ttl,
-			"error", err,
-		)
+			"error", err)
 		return fmt.Errorf("failed to create TXT record: %w", err)
 	}
 
-	Info("TXT record created successfully",
-		"fqdn", ch.ResolvedFQDN,
-		"key", ch.Key,
-		"ttl", ttl,
+	Info("ACME challenge: Present completed",
+		"uid", ch.UID,
+		"action", "present",
+		"dns_name", dnsName,
 		"zone", cfg.ZoneName,
+		"record_name", ch.ResolvedFQDN,
 	)
 	return nil
 }
@@ -87,46 +138,72 @@ func (s *HuaweiCloudSolver) Present(ch *v1alpha1.ChallengeRequest) error {
 // This is in order to facilitate multiple DNS validations for the same domain
 // concurrently.
 func (s *HuaweiCloudSolver) CleanUp(ch *v1alpha1.ChallengeRequest) error {
-	Debug("CleanUp called",
-		"resolved_fqdn", ch.ResolvedFQDN,
-		"key", ch.Key,
-		"resource_namespace", ch.ResourceNamespace,
-	)
-
 	cfg, err := loadConfig(ch.Config)
 	if err != nil {
-		Error("failed to load config", "error", err)
+		Error("ACME challenge: failed to load config",
+			"uid", ch.UID,
+			"action", "cleanup",
+			"error", err)
 		return fmt.Errorf("failed to load config: %w", err)
 	}
+
+	dnsName := extractDNSName(ch)
+
+	Info("ACME challenge: CleanUp started",
+		"uid", ch.UID,
+		"action", "cleanup",
+		"dns_name", dnsName,
+		"resolved_fqdn", ch.ResolvedFQDN,
+	)
 
 	// Get credentials from Kubernetes Secret
 	ak, sk, err := s.getCredentials(ch.ResourceNamespace, cfg.AKSecretRef, cfg.SKSecretRef)
 	if err != nil {
-		Error("failed to get credentials", "namespace", ch.ResourceNamespace, "error", err)
+		Error("ACME challenge: failed to get credentials",
+			"uid", ch.UID,
+			"action", "cleanup",
+			"dns_name", dnsName,
+			"namespace", ch.ResourceNamespace,
+			"error", err)
 		return fmt.Errorf("failed to get credentials: %w", err)
 	}
 
 	// Create DNS client
 	dnsClient, err := NewDNSClient(cfg.Region, cfg.ProjectID, ak, sk, cfg.ZoneName)
 	if err != nil {
-		Error("failed to create DNS client", "region", cfg.Region, "project_id", cfg.ProjectID, "error", err)
+		Error("ACME challenge: failed to create DNS client",
+			"uid", ch.UID,
+			"action", "cleanup",
+			"dns_name", dnsName,
+			"region", cfg.Region,
+			"project_id", cfg.ProjectID,
+			"error", err)
 		return fmt.Errorf("failed to create DNS client: %w", err)
 	}
 
+	// Create operation context for DNS operations
+	ctx := OperationContext{
+		UID:     string(ch.UID),
+		Action:  "cleanup",
+		DNSName: dnsName,
+	}
+
 	// Delete the specific TXT record matching the key
-	err = dnsClient.DeleteTXTRecord(ch.ResolvedFQDN, ch.Key)
+	err = dnsClient.DeleteTXTRecord(ctx, ch.ResolvedFQDN, ch.Key)
 	if err != nil {
-		Error("failed to delete TXT record",
-			"fqdn", ch.ResolvedFQDN,
-			"value", ch.Key,
-			"error", err,
-		)
+		Error("ACME challenge: failed to delete TXT record",
+			"uid", ch.UID,
+			"action", "cleanup",
+			"dns_name", dnsName,
+			"record_name", ch.ResolvedFQDN,
+			"error", err)
 		return fmt.Errorf("failed to delete TXT record: %w", err)
 	}
 
-	Info("TXT record deleted successfully",
-		"fqdn", ch.ResolvedFQDN,
-		"key", ch.Key,
+	Info("ACME challenge: CleanUp completed",
+		"uid", ch.UID,
+		"action", "cleanup",
+		"dns_name", dnsName,
 		"zone", cfg.ZoneName,
 	)
 	return nil

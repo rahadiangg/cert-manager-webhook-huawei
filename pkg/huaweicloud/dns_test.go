@@ -253,7 +253,12 @@ func TestDNSClient_CreateTXTRecordValidation(t *testing.T) {
 				}
 			}()
 
-			err := d.CreateTXTRecord(tt.fqdn, tt.value, tt.ttl)
+			ctx := OperationContext{
+				UID:     "test-uid",
+				Action:  "present",
+				DNSName: tt.zoneName,
+			}
+			err := d.CreateTXTRecord(ctx, tt.fqdn, tt.value, tt.ttl)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("CreateTXTRecord() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -296,7 +301,12 @@ func TestDNSClient_DeleteTXTRecordValidation(t *testing.T) {
 				}
 			}()
 
-			err := d.DeleteTXTRecord(tt.fqdn, tt.value)
+			ctx := OperationContext{
+				UID:     "test-uid",
+				Action:  "cleanup",
+				DNSName: tt.zoneName,
+			}
+			err := d.DeleteTXTRecord(ctx, tt.fqdn, tt.value)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("DeleteTXTRecord() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -430,7 +440,12 @@ func TestDNSClient_InvalidZoneID(t *testing.T) {
 	}()
 
 	// Test operations with empty zone ID
-	err := d.CreateTXTRecord("_acme-challenge.example.com", "test-value", 60)
+	ctx := OperationContext{
+		UID:     "test-uid",
+		Action:  "present",
+		DNSName: "example.com",
+	}
+	err := d.CreateTXTRecord(ctx, "_acme-challenge.example.com", "test-value", 60)
 	if err == nil {
 		t.Error("CreateTXTRecord() with empty zoneID should return error")
 	}
@@ -490,7 +505,12 @@ func TestCreateTXTRecord_Idempotency(t *testing.T) {
 			}()
 
 			// First call should fail without real client, but we test the pattern
-			err := d.CreateTXTRecord(tt.fqdn, tt.value, tt.ttl)
+			ctx := OperationContext{
+				UID:     "test-uid",
+				Action:  "present",
+				DNSName: tt.zoneName,
+			}
+			err := d.CreateTXTRecord(ctx, tt.fqdn, tt.value, tt.ttl)
 			// Expected to fail without real client
 			if err == nil {
 				t.Log("CreateTXTRecord succeeded unexpectedly (may have mock client)")
@@ -534,10 +554,15 @@ func TestCreateTXTRecord_ValueMismatch(t *testing.T) {
 				}
 			}()
 
+			ctx := OperationContext{
+				UID:     "test-uid",
+				Action:  "present",
+				DNSName: tt.zoneName,
+			}
 			// First call
-			_ = d.CreateTXTRecord(tt.fqdn, tt.firstValue, tt.ttl)
+			_ = d.CreateTXTRecord(ctx, tt.fqdn, tt.firstValue, tt.ttl)
 			// Second call with different value
-			err := d.CreateTXTRecord(tt.fqdn, tt.secondValue, tt.ttl)
+			err := d.CreateTXTRecord(ctx, tt.fqdn, tt.secondValue, tt.ttl)
 			// Expected to fail without real client
 			if err == nil {
 				t.Log("CreateTXTRecord succeeded unexpectedly (may have mock client)")
@@ -580,7 +605,12 @@ func TestCreateTXTRecord_MultipleRecordsCleanup(t *testing.T) {
 				}
 			}()
 
-			err := d.CreateTXTRecord(tt.fqdn, tt.value, tt.ttl)
+			ctx := OperationContext{
+				UID:     "test-uid",
+				Action:  "present",
+				DNSName: tt.zoneName,
+			}
+			err := d.CreateTXTRecord(ctx, tt.fqdn, tt.value, tt.ttl)
 			// Expected to fail without real client
 			if err == nil {
 				t.Log("CreateTXTRecord succeeded unexpectedly (may have mock client)")
