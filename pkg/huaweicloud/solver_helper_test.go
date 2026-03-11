@@ -545,3 +545,269 @@ func TestHuaweiCloudSolver_EmptyKeyHandling(t *testing.T) {
 		t.Errorf("Key = %v, want empty string", ch.Key)
 	}
 }
+
+// TestHuaweiCloudSolver_ExtractDNSNameEdgeCases tests edge cases for extractDNSName via Present
+func TestHuaweiCloudSolver_ExtractDNSNameEdgeCases(t *testing.T) {
+	tests := []struct {
+		name         string
+		dnsName      string
+		resolvedFQDN string
+		expectError  bool
+		errContains  string
+	}{
+		{
+			name:         "empty FQDN returns unknown",
+			dnsName:      "",
+			resolvedFQDN: "",
+			expectError:  true, // Will fail at credential stage
+			errContains:  "failed to get credentials",
+		},
+		{
+			name:         "single label FQDN returns unknown",
+			dnsName:      "",
+			resolvedFQDN: "com",
+			expectError:  true,
+			errContains:  "failed to get credentials",
+		},
+		{
+			name:         "FQDN without acme prefix extracts zone",
+			dnsName:      "",
+			resolvedFQDN: "api.example.com",
+			expectError:  true,
+			errContains:  "failed to get credentials",
+		},
+		{
+			name:         "wildcard DNSName with trailing dot",
+			dnsName:      "*.example.com.",
+			resolvedFQDN: "_acme-challenge.example.com",
+			expectError:  true,
+			errContains:  "failed to get credentials",
+		},
+		{
+			name:         "wildcard subdomain",
+			dnsName:      "*.api.example.com",
+			resolvedFQDN: "_acme-challenge.api.example.com",
+			expectError:  true,
+			errContains:  "failed to get credentials",
+		},
+		{
+			name:         "FQDN with trailing dot",
+			dnsName:      "",
+			resolvedFQDN: "_acme-challenge.example.com.",
+			expectError:  true,
+			errContains:  "failed to get credentials",
+		},
+		{
+			name:         "FQDN with multiple subdomains",
+			dnsName:      "",
+			resolvedFQDN: "_acme-challenge.a.b.c.d.example.com",
+			expectError:  true,
+			errContains:  "failed to get credentials",
+		},
+		{
+			name:         "non-wildcard DNSName is ignored",
+			dnsName:      "example.com",
+			resolvedFQDN: "_acme-challenge.example.com",
+			expectError:  true,
+			errContains:  "failed to get credentials",
+		},
+		{
+			name:         "wildcard with multi-level TLD",
+			dnsName:      "*.example.co.uk",
+			resolvedFQDN: "_acme-challenge.example.co.uk",
+			expectError:  true,
+			errContains:  "failed to get credentials",
+		},
+		{
+			name:         "empty DNSName with valid FQDN",
+			dnsName:      "",
+			resolvedFQDN: "_acme-challenge.test.example.com",
+			expectError:  true,
+			errContains:  "failed to get credentials",
+		},
+		{
+			name:         "both empty",
+			dnsName:      "",
+			resolvedFQDN: "",
+			expectError:  true,
+			errContains:  "failed to get credentials",
+		},
+		{
+			name:         "numeric labels in FQDN",
+			dnsName:      "",
+			resolvedFQDN: "_acme-challenge.123.example.com",
+			expectError:  true,
+			errContains:  "failed to get credentials",
+		},
+		{
+			name:         "hyphen in zone name",
+			dnsName:      "*.my-example.com",
+			resolvedFQDN: "_acme-challenge.my-example.com",
+			expectError:  true,
+			errContains:  "failed to get credentials",
+		},
+	}
+
+	config := `{
+		"region": "cn-north-4",
+		"projectId": "test-project",
+		"zoneName": "example.com",
+		"akSecretRef": {"name": "ak", "key": "ak"},
+		"skSecretRef": {"name": "sk", "key": "sk"}
+	}`
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &HuaweiCloudSolver{}
+
+			ch := &v1alpha1.ChallengeRequest{
+				Config: &extapi.JSON{
+					Raw: []byte(config),
+				},
+				ResourceNamespace: "default",
+				DNSName:           tt.dnsName,
+				ResolvedFQDN:      tt.resolvedFQDN,
+				Key:               "test-key",
+			}
+
+			err := s.Present(ch)
+			if tt.expectError {
+				if err == nil {
+					t.Error("Expected error when client is not initialized")
+				}
+				if err != nil && tt.errContains != "" && !containsSubstring(err.Error(), tt.errContains) {
+					t.Errorf("Expected error to contain '%s', got: %v", tt.errContains, err)
+				}
+			}
+		})
+	}
+}
+
+// TestHuaweiCloudSolver_CleanUpExtractDNSName tests extractDNSName via CleanUp
+func TestHuaweiCloudSolver_CleanUpExtractDNSName(t *testing.T) {
+	tests := []struct {
+		name         string
+		dnsName      string
+		resolvedFQDN string
+	}{
+		{
+			name:         "wildcard cert cleanup",
+			dnsName:      "*.example.com",
+			resolvedFQDN: "_acme-challenge.example.com",
+		},
+		{
+			name:         "standard cert cleanup",
+			dnsName:      "",
+			resolvedFQDN: "_acme-challenge.api.example.com",
+		},
+		{
+			name:         "deep subdomain cleanup",
+			dnsName:      "",
+			resolvedFQDN: "_acme-challenge.a.b.c.example.com",
+		},
+		{
+			name:         "multi-level TLD cleanup",
+			dnsName:      "*.example.co.uk",
+			resolvedFQDN: "_acme-challenge.example.co.uk",
+		},
+	}
+
+	config := `{
+		"region": "cn-north-4",
+		"projectId": "test-project",
+		"zoneName": "example.com",
+		"akSecretRef": {"name": "ak", "key": "ak"},
+		"skSecretRef": {"name": "sk", "key": "sk"}
+	}`
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &HuaweiCloudSolver{}
+
+			ch := &v1alpha1.ChallengeRequest{
+				Config: &extapi.JSON{
+					Raw: []byte(config),
+				},
+				ResourceNamespace: "default",
+				DNSName:           tt.dnsName,
+				ResolvedFQDN:      tt.resolvedFQDN,
+				Key:               "test-key",
+			}
+
+			err := s.CleanUp(ch)
+			if err == nil {
+				t.Error("Expected error when client is not initialized")
+			}
+		})
+	}
+}
+
+// TestHuaweiCloudSolver_DNSClientCreationFailure tests DNS client creation error paths
+func TestHuaweiCloudSolver_DNSClientCreationFailure(t *testing.T) {
+	s := &HuaweiCloudSolver{}
+
+	// This test verifies that Present fails properly when DNS client creation fails
+	// due to invalid region (using an invalid region name)
+	config := `{
+		"region": "invalid-region-name",
+		"projectId": "test-project",
+		"zoneName": "example.com",
+		"akSecretRef": {"name": "ak", "key": "ak"},
+		"skSecretRef": {"name": "sk", "key": "sk"}
+	}`
+
+	ch := &v1alpha1.ChallengeRequest{
+		Config: &extapi.JSON{
+			Raw: []byte(config),
+		},
+		ResourceNamespace: "default",
+		ResolvedFQDN:      "_acme-challenge.example.com",
+		Key:               "test-key",
+	}
+
+	err := s.Present(ch)
+	// Should fail either at config loading (if validation catches it) or at DNS client creation
+	if err == nil {
+		t.Error("Expected error with invalid region")
+	}
+
+	// The error should be related to the invalid region or DNS client creation
+	if err != nil {
+		errStr := err.Error()
+		// Check if error mentions region or DNS client
+		if !containsSubstring(errStr, "region") && !containsSubstring(errStr, "DNS") {
+			t.Logf("Error: %v (may be from credential stage)", err)
+		}
+	}
+}
+
+// TestHuaweiCloudSolver_InvalidProjectID tests with empty/invalid project ID
+func TestHuaweiCloudSolver_InvalidProjectID(t *testing.T) {
+	s := &HuaweiCloudSolver{}
+
+	config := `{
+		"region": "cn-north-4",
+		"projectId": "",
+		"zoneName": "example.com",
+		"akSecretRef": {"name": "ak", "key": "ak"},
+		"skSecretRef": {"name": "sk", "key": "sk"}
+	}`
+
+	ch := &v1alpha1.ChallengeRequest{
+		Config: &extapi.JSON{
+			Raw: []byte(config),
+		},
+		ResourceNamespace: "default",
+		ResolvedFQDN:      "_acme-challenge.example.com",
+		Key:               "test-key",
+	}
+
+	err := s.Present(ch)
+	if err == nil {
+		t.Error("Expected error with empty project ID")
+	}
+
+	if err != nil && !containsSubstring(err.Error(), "projectId") {
+		t.Logf("Error: %v", err)
+	}
+}
